@@ -142,6 +142,7 @@ class ManipulationEnv(RobotEnv):
         camera_segmentations=None,
         renderer="mujoco",
         renderer_config=None,
+        initial_qpos=None,
     ):
         # Robot info
         robots = list(robots) if type(robots) is list or type(robots) is tuple else [robots]
@@ -151,9 +152,11 @@ class ManipulationEnv(RobotEnv):
         gripper_types = self._input2list(gripper_types, num_robots)
 
         # Robot configurations to pass to super call
+        initial_qpos = self._input2list(initial_qpos, num_robots)
         robot_configs = [
             {
                 "gripper_type": gripper_types[idx],
+                "initial_qpos": initial_qpos[idx],
             }
             for idx in range(num_robots)
         ]
