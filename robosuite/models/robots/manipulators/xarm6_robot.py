@@ -46,12 +46,15 @@ class xArm6(ManipulatorModel):
         return {
             # "bins": (-0.5, -0.1, 0),
             "bins": (-0.407, 0.0, 0.171),    # PickPlace
+            "bins_nomount": (0.307, 0.0, -0.158),
             "empty": (-0.6, 0, 0),
             # "table": lambda table_length: (-0.16 - table_length / 2, 0, 0),
-            "table": lambda table_length: (-0.407, 0, 0.171)      # Reach/Lift
+            "table": lambda table_length: (-0.407, 0, 0.171),      # Reach/Lift
             # "table": lambda table_length: (-0.437, 0, 0.171)
+            # "table_nomount": lambda table_length: (table_length/2 - 0.0072, 0, 0),
+            "table_nomount": lambda table_length: (0.307, 0, -0.1333),
         }
-
+    
     @property
     def top_offset(self):
         return np.array((0, 0, 1.0))

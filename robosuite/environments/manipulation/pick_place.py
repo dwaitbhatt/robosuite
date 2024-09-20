@@ -207,6 +207,7 @@ class PickPlace(SingleArmEnv):
         renderer_config=None,
         use_touch_obs=False,
         use_tactile_obs=False,
+        mount_type="default",
     ):
         # task settings
         self.single_object_mode = single_object_mode
@@ -241,18 +242,20 @@ class PickPlace(SingleArmEnv):
         self.use_touch_obs = use_touch_obs
         self.use_tactile_obs = use_tactile_obs
         if self.use_touch_obs:
-            assert gripper_types in ['PandaTouchGripper', 'Robotiq85TouchGripper'], (
-                "Must specify gripper_types in ['PandaTouchGripper', 'Robotiq85TouchGripper']")
+            assert gripper_types in ['PandaTouchGripper', 'Robotiq85TouchGripper', 'RethinkTouchGripper'], (
+                "Must specify gripper_types in ['PandaTouchGripper', 'Robotiq85TouchGripper', 'RethinkTouchGripper']")
 
         elif self.use_tactile_obs:
             assert robots == "Panda", "Tactile sensor is only implemented on Panda gripper"
             gripper_types = "PandaTactileGripper" 
 
+        self.mount_type = mount_type
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            mount_types="default",
+            mount_types=mount_type,
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -436,8 +439,10 @@ class PickPlace(SingleArmEnv):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
 
         # can sample anywhere in bin
-        bin_x_half = self.model.mujoco_arena.table_full_size[0] / 2 - 0.05
-        bin_y_half = self.model.mujoco_arena.table_full_size[1] / 2 - 0.05
+        # bin_x_half = self.model.mujoco_arena.table_full_size[0] / 2 - 0.05
+        # bin_y_half = self.model.mujoco_arena.table_full_size[1] / 2 - 0.05
+        bin_x_half = 0.05
+        bin_y_half = 0.05
 
         # each object should just be sampled in the bounds of the bin (with some tolerance)
         self.placement_initializer.append_sampler(
@@ -448,8 +453,8 @@ class PickPlace(SingleArmEnv):
                 y_range=[-bin_y_half, bin_y_half],
                 rotation=self.z_rotation,
                 rotation_axis="z",
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
+                ensure_object_boundary_in_range=False,
+                ensure_valid_placement=False,
                 reference_pos=self.bin1_pos,
                 z_offset=self.z_offset,
             )
@@ -525,8 +530,16 @@ class PickPlace(SingleArmEnv):
         """
         super()._load_model()
 
-        # Adjust base pose accordingly
-        xpos = self.robots[0].robot_model.base_xpos_offset["bins"]
+        # Adjust base pose according to mount type
+        if self.mount_type is None:
+            if "bins_nomount" in self.robots[0].robot_model.base_xpos_offset:
+                xpos = np.array([0, 0, self.bin1_pos[2]])
+                xpos -= self.robots[0].robot_model.base_xpos_offset["bins_nomount"]
+            else:
+                raise ValueError(f"Offset for table arena without mount is not defined in robot_model for {self.robots[0].robot_model.name}.\
+                                 Please specify this offset to ensure initial eef position (x,y) is same [-0.2, 0] across different robots.")
+        else:
+            xpos = self.robots[0].robot_model.base_xpos_offset["bins"]
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace

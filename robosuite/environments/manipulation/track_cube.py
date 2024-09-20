@@ -69,17 +69,9 @@ class TrackCube(SingleArmEnv):
         self.cube_velocity = np.random.uniform(-0.03, 0.03, size=3)
         self.cube_velocity[2] = 0  # Set z-velocity to 0 to keep the cube on the table
 
-        # Set initial qpos to avoid eef collision with table (since we're not using a mount)
-        # Determined by bringing default init eef position for xArm6 up in z axis until collision is avoided
-        initial_qpos_dict = {
-            "xArm6": np.array([1.55499306e-03, -1.02603911e+00, 5.01407118e-02, 
-                                2.35911318e-04, 9.74043449e-01, 1.70899325e-03]),
-            "Panda": np.array([ 0.02393744, -0.12377735, -0.02544775, 
-                                -2.55581167, -0.00426772,  2.43323904, 0.78727797]),
-            "Sawyer": np.array([0.01857909, -1.46858229, -0.06723376,  
-                                2.10537169,  0.00965024,  0.93301487, -1.45014191])
-        }
-        initial_qpos = initial_qpos_dict[robots]
+        self._target_offset = np.array([0.0, 0.0, 0.05])
+
+        self.episode_count = 0
 
         super().__init__(
             robots=robots,
@@ -103,7 +95,6 @@ class TrackCube(SingleArmEnv):
             camera_heights=camera_heights,
             camera_widths=camera_widths,
             camera_depths=camera_depths,
-            initial_qpos=initial_qpos,
         )
 
     def _load_model(self):
@@ -127,10 +118,13 @@ class TrackCube(SingleArmEnv):
 
         # Adjust base pose to place the robot on top of the table
         # robot_base_position = self.robots[0].robot_model.base_xpos_offset["bins"]
-        robot_base_position = self.table_offset.copy()
-        robot_base_position[0] -= self.table_full_size[0]/2 - 0.05
-        self.robots[0].robot_model.set_base_xpos(robot_base_position)
-
+        xpos = self.table_offset.copy()
+        if "table_nomount" in self.robots[0].robot_model.base_xpos_offset:
+            xpos -= self.robots[0].robot_model.base_xpos_offset["table_nomount"](self.table_full_size[0])
+        else:
+            raise ValueError(f"Offset for table arena without mount is not defined in robot_model for {self.robots[0].robot_model.name}.\
+                             Please specify this offset to ensure initial eef position (x,y) is same [-0.1, 0] across different robots.")
+        self.robots[0].robot_model.set_base_xpos(xpos)
 
         # # Add a red ball to indicate origin
         # origin_ball = BallObject(
@@ -201,12 +195,22 @@ class TrackCube(SingleArmEnv):
             z_offset=0.01,
         )
 
+        # A red ball to indicate target position (5cm above the cube)
+        self.target_ball = BallObject(
+            name="target_ball",
+            size=[0.015],
+            rgba=[1, 0, 0, 1],
+            obj_type='visual',
+            joints=None
+        )
+        self.target_ball.get_obj().set("pos", " ".join(map(str, self.table_offset + self._target_offset)))
+
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
             # mujoco_objects=[self.cube, origin_ball, z_axis_line, table_center_ball],
-            mujoco_objects=[self.cube],
+            mujoco_objects=[self.cube, self.target_ball],
         )
 
     def _setup_observables(self):
@@ -233,13 +237,20 @@ class TrackCube(SingleArmEnv):
                 else np.zeros(3)
             )
 
-        # For compatibility with scripts that expect target_pos
         @sensor(modality="object")
         def target_pos(obs_cache):
-            return self._cube_xpos
+            return self._cube_xpos + self._target_offset
+        
+        @sensor(modality="object")
+        def target_to_eef_pos(obs_cache):
+            return (
+                obs_cache[f"{pf}eef_pos"] - obs_cache["target_pos"]
+                if "target_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
+                else np.zeros(3)
+            )
 
-        sensors = [cube_pos, cube_to_eef_pos, target_pos]
-        names = [f"cube_pos", f"cube_to_{pf}eef_pos", f"target_pos"]
+        sensors = [cube_pos, cube_to_eef_pos, target_pos, target_to_eef_pos]
+        names = [f"cube_pos", f"cube_to_{pf}eef_pos", f"target_pos", f"target_to_{pf}eef_pos"]
 
         # Create observables
         for name, s in zip(names, sensors):
@@ -258,9 +269,11 @@ class TrackCube(SingleArmEnv):
             reset_joint_pos = True
         
         super().reset()
-        
-        if reset_joint_pos:
+        self.episode_count += 1
+
+        if reset_joint_pos and self.episode_count % 2 != 0:
             self.robots[0].set_robot_joint_positions(joint_pos)
+        
         observations = (
             self.viewer._get_observations(force_update=True)
             if self.viewer_get_obs
@@ -281,10 +294,18 @@ class TrackCube(SingleArmEnv):
 
             # Get the sampled position and orientation for the cube
             cube_pos, cube_quat, _ = object_placements[self.cube.name]
+            cube_pos = np.array(cube_pos)
+            cube_pos[0] = max(cube_pos[0], self.robots[0].base_pos[0] + 0.2)
 
             # Set the cube's position and orientation
             self.sim.data.set_joint_qpos(self.cube.joints[0], np.concatenate([cube_pos, cube_quat]))
-
+            
+            # Reset target ball position
+            target_ball_pos = cube_pos + self._target_offset
+            # self.target_ball.get_obj().set("pos", " ".join(map(str, target_ball_pos)))
+            target_ball_id = self.sim.model.body_name2id(self.target_ball.root_body)
+            self.sim.model.body_pos[target_ball_id] = target_ball_pos
+            
     def _setup_references(self):
         """
         Sets up references to important components.
@@ -308,10 +329,10 @@ class TrackCube(SingleArmEnv):
 
             # reaching reward
             gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-            target_pos = self._cube_xpos
+            target_pos = self._cube_xpos + self._target_offset
             dist = np.linalg.norm(gripper_site_pos - target_pos)
-            reaching_reward = 1 - np.tanh(10.0 * dist)
-            # reaching_reward = -((2 * dist) ** 2)
+            # reaching_reward = 1 - np.tanh(10.0 * dist)
+            reaching_reward = -((2 * dist) ** 2)
             reward += reaching_reward
 
         reward *= self.reward_scale
@@ -346,12 +367,17 @@ class TrackCube(SingleArmEnv):
             # Update cube position
             self.sim.data.set_joint_qpos(self.cube.joints[0], np.concatenate([new_pos, [1, 0, 0, 0]]))
 
+            # Update target ball position
+            target_ball_pos = new_pos + self._target_offset
+            target_ball_id = self.sim.model.body_name2id(self.target_ball.root_body)
+            self.sim.model.body_pos[target_ball_id] = target_ball_pos
+
     def _check_success(self):
         """
         Check if the task has been completed successfully.
         """
-        cube_to_eef_pos = self._cube_xpos - self._eef_xpos
-        return np.linalg.norm(cube_to_eef_pos) < 0.05
+        target_to_eef_pos = self._cube_xpos + self._target_offset - self._eef_xpos
+        return np.linalg.norm(target_to_eef_pos) < 0.05
     
     @property
     def _cube_xpos(self):

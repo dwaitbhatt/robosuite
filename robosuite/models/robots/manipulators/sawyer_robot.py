@@ -35,9 +35,12 @@ class Sawyer(ManipulatorModel):
     def base_xpos_offset(self):
         return {
             "bins": (-0.5, -0.1, 0),
+            "bins_nomount": (0.54968339, 0.16029991, -0.01774591),
             "empty": (-0.6, 0, 0),
             # "table": lambda table_length: (-0.16 - table_length / 2, 0, 0),
-            "table": lambda table_length: (-0.6497, -0.1603, 0.03075)
+            "table": lambda table_length: (-0.6497, -0.1603, 0.03075),
+            # "table_nomount": lambda table_length: (table_length/2 + 0.243, 0.14994, 0),
+            "table_nomount": lambda table_length: (0.5496, 0.16030, 0.00725409),
         }
 
     @property
