@@ -151,8 +151,23 @@ class ManipulationEnv(RobotEnv):
         # Gripper
         gripper_types = self._input2list(gripper_types, num_robots)
 
+        ROBOT_INIT_QPOS = {
+            "xArm6": np.array([1.56280772e-03, -1.10912404e+00, -9.71343926e-02,  
+                               1.52969832e-04, 1.20606723e+00, 1.66234924e-03]),
+            "Panda": np.array([2.41186189e-02, 4.49452249e-02, -2.49503350e-02, -2.57353640e+00,
+                               1.76409981e-03, 2.61890973e+00, 7.84038642e-01]),
+            "Sawyer": np.array([0.01166281, -1.28931424, -0.0466418,   2.17754098,  
+                                0.0195345,   0.68289069, -1.44560231])
+        }
+
+        # In case of unmounted robots, use custom initial qpos that match initial eef position
+        if mount_types is None and initial_qpos is None:
+            initial_qpos = [ROBOT_INIT_QPOS.get(robot, None) for robot in robots]
+        else:
+            initial_qpos = self._input2list(initial_qpos, num_robots)
+        
         # Robot configurations to pass to super call
-        initial_qpos = self._input2list(initial_qpos, num_robots)
+        # initial_qpos = self._input2list(initial_qpos, num_robots)
         robot_configs = [
             {
                 "gripper_type": gripper_types[idx],

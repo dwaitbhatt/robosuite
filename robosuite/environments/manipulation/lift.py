@@ -174,6 +174,7 @@ class Lift(SingleArmEnv):
         use_touch_obs=False,
         use_tactile_obs=False,
         init_cube_pos=None,
+        init_cube_pos_range=None,
         mount_type="default",
     ):
         # settings for table top
@@ -204,7 +205,7 @@ class Lift(SingleArmEnv):
             gripper_types = "PandaTactileGripper" 
 
         self.init_cube_pos = init_cube_pos
-
+        self.init_cube_pos_range = init_cube_pos_range
         self.target_pos = np.array([0., 0., 1.0])
 
         self.mount_type = mount_type
@@ -345,12 +346,15 @@ class Lift(SingleArmEnv):
             material=redwood,
         )
 
-        if self.init_cube_pos is None:
-            x_range = [-0.05, 0.05]
-            y_range = [-0.05, 0.05]     
-        else:
+        if self.init_cube_pos is not None:
             x_range = [self.init_cube_pos[0], self.init_cube_pos[0]]
             y_range = [self.init_cube_pos[1], self.init_cube_pos[1]]   
+        elif self.init_cube_pos_range is not None:
+            x_range = [self.init_cube_pos_range[0], self.init_cube_pos_range[1]]
+            y_range = [self.init_cube_pos_range[2], self.init_cube_pos_range[3]]
+        else:
+            x_range = [-0.05, 0.05]
+            y_range = [-0.05, 0.05]     
 
         # Create placement initializer
         if self.placement_initializer is not None:
