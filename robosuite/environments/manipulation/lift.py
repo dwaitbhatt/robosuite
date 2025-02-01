@@ -3,7 +3,7 @@ from collections import OrderedDict
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
+from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BoxObject, BallObject
 from robosuite.models.tasks import ManipulationTask
@@ -13,7 +13,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler
 import robosuite.utils.transform_utils as T
 
 
-class Lift(SingleArmEnv):
+class Lift(ManipulationEnv):
     """
     This class corresponds to the lifting task for a single robot arm.
 
@@ -90,6 +90,9 @@ class Lift(SingleArmEnv):
         control_freq (float): how many control signals to receive in every second. This sets the amount of
             simulation time that passes between every action input.
 
+        lite_physics (bool): Whether to optimize for mujoco forward and step calls to reduce total simulation overhead.
+            Set to False to preserve backward compatibility with datasets collected in robosuite <= 1.4.1.
+
         horizon (int): Every episode lasts for exactly @horizon timesteps.
 
         ignore_done (bool): True if never terminating the environment (ignore @horizon).
@@ -161,6 +164,7 @@ class Lift(SingleArmEnv):
         render_visual_mesh=True,
         render_gpu_device_id=-1,
         control_freq=20,
+        lite_physics=True,
         horizon=1000,
         ignore_done=False,
         hard_reset=True,
@@ -169,7 +173,7 @@ class Lift(SingleArmEnv):
         camera_widths=256,
         camera_depths=False,
         camera_segmentations=None,  # {None, instance, class, element}
-        renderer="mujoco",
+        renderer="mjviewer",
         renderer_config=None,
         use_touch_obs=False,
         use_tactile_obs=False,
@@ -213,7 +217,7 @@ class Lift(SingleArmEnv):
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            mount_types=mount_type,
+            base_types="default",
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -224,6 +228,7 @@ class Lift(SingleArmEnv):
             render_visual_mesh=render_visual_mesh,
             render_gpu_device_id=render_gpu_device_id,
             control_freq=control_freq,
+            lite_physics=lite_physics,
             horizon=horizon,
             ignore_done=ignore_done,
             hard_reset=hard_reset,
@@ -271,9 +276,9 @@ class Lift(SingleArmEnv):
         elif self.reward_shaping:
 
             # reaching reward
-            cube_pos = self.sim.data.body_xpos[self.cube_body_id]
-            gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-            dist = np.linalg.norm(gripper_site_pos - cube_pos)
+            dist = self._gripper_to_target(
+                gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=True
+            )
             reaching_reward = 1 - np.tanh(10.0 * dist)
             reward += reaching_reward
 
@@ -282,6 +287,7 @@ class Lift(SingleArmEnv):
                 reward += 0.25
             
             # move cube to target reward
+            cube_pos = self.sim.data.body_xpos[self.cube_body_id]
             dist = np.linalg.norm(self.target_pos - cube_pos)
             reach_target_reward = 1 - np.tanh(10.0 * dist)
             reward += reach_target_reward
@@ -477,6 +483,7 @@ class Lift(SingleArmEnv):
 
         # low-level object information
         if self.use_object_obs:
+            # define observables modality
             modality = "object"
 
             # for conversion to relative gripper frame
@@ -517,56 +524,20 @@ class Lift(SingleArmEnv):
                 rel_pos = obs_cache[f"{pf}eef_pos"] - obs_cache[f"{obj_name}_pos"]
                 return rel_pos  
 
-            @sensor(modality=modality)
-            def obj_to_eef_quat(obs_cache):
-                return (
-                    obs_cache[f"{obj_name}_to_{pf}eef_quat"] if f"{obj_name}_to_{pf}eef_quat" in obs_cache else np.zeros(4)
-                )
+            sensors = [cube_pos, cube_quat]
 
-            @sensor(modality=modality)
-            def eef_to_obj_yaw(obs_cache):
-                """Computes the minimum yaw rotation to align with object"""
-                if f"{pf}eef_quat" not in obs_cache or f"{obj_name}_quat" not in obs_cache:
-                    return np.array([0.,])
+            arm_prefixes = self._get_arm_prefixes(self.robots[0], include_robot_name=False)
+            full_prefixes = self._get_arm_prefixes(self.robots[0])
 
-                eef_quat = obs_cache[f'{pf}eef_quat']
-                obj_quat = obs_cache[f'{obj_name}_quat']
-                eef_az = R.from_quat(eef_quat).as_euler('zyx')[0]
-                obj_az = R.from_quat(obj_quat).as_euler('zyx')[0]
-
-                # Flip gripper yaw since it is pointing down
-                eef_az = self.normalize_angle(2 * np.pi - eef_az)
-
-                possible_az = self.normalize_angle(obj_az + np.pi * np.array([0, 0.5, 1, 1.5]))
-                diff_az = self.normalize_angle(np.array([az - eef_az for az in possible_az]))
-                i = np.argmin(np.abs(diff_az))
-                return np.array([possible_az[i] - eef_az,])
-            
-            @sensor(modality=modality)
-            def obj_to_target_pos(obs_cache):
-                if 'cube_pos' not in obs_cache:
-                    return np.zeros(3)
-                else:
-                    return self.target_pos - obs_cache['cube_pos']
-
-            obj_sensors = [cube_pos, cube_quat, obj_to_eef_pos, obj_to_eef_quat, 
-                eef_to_obj_yaw, obj_to_target_pos]
-            obj_sensor_names = [
-                f"{obj_name}_pos", f"{obj_name}_quat", 
-                f"{obj_name}_to_{pf}eef_pos", 
-                f"{obj_name}_to_{pf}eef_quat",
-                f"{pf}eef_to_{obj_name}_yaw",
-                f"{obj_name}_to_target_pos",
+            # gripper to cube position sensor; one for each arm
+            sensors += [
+                self._get_obj_eef_sensor(full_pf, "cube_pos", f"{arm_pf}gripper_to_cube_pos", modality)
+                for arm_pf, full_pf in zip(arm_prefixes, full_prefixes)
             ]
-            sensors.extend(obj_sensors)
-            names.extend(obj_sensor_names) 
-            enableds += [True] * len(obj_sensors)
-            actives += [True] * len(obj_sensor_names)
+            names = [s.__name__ for s in sensors]
 
-
-        # Create observables
-        if len(names) > 0:
-            for name, s, enabled, active in zip(names, sensors, enableds, actives):
+            # Create observables
+            for name, s in zip(names, sensors):
                 observables[name] = Observable(
                     name=name,
                     sensor=s,

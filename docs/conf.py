@@ -42,6 +42,11 @@ extensions = [
     "sphinx.ext.autodoc",
     "recommonmark",  # use Sphinx-1.4 or newer
     "nbsphinx",
+    "sphinx_togglebutton",
+]
+
+myst_enable_extensions = [
+    "dollarmath",
 ]
 
 mathjax_config = {
@@ -79,7 +84,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "robosuite"
-copyright = "Stanford University and The University of Texas at Austin 2022"
+copyright = "Stanford University and The University of Texas at Austin 2025"
 author = "the robosuite core team"
 
 # The version info for the project you're documenting, acts as replacement for
@@ -181,4 +186,11 @@ man_pages = [(master_doc, "robosuite", "robosuite Documentation", [author], 1)]
 #  dir menu entry, description, category)
 texinfo_documents = [
     (master_doc, "robosuite", "robosuite Documentation", author, "robosuite", "ARISE", "Miscellaneous"),
+]
+
+autodoc_mock_imports = [
+    "robosuite.devices.mjgui",
+    "robosuite.devices.spacemouse",
+    "robosuite.devices.keyboard",
+    "robosuite.devices.device",
 ]
