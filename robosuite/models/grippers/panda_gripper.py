@@ -144,7 +144,7 @@ class PandaTactileGripper(PandaGripperBase):
 
     @property
     def speed(self):
-        return 0.01
+        return 0.2
 
     @property
     def dof(self):

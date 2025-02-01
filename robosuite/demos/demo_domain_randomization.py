@@ -2,8 +2,9 @@
 Script to showcase domain randomization functionality.
 """
 
+import time
+
 import robosuite.macros as macros
-from robosuite.controllers import load_controller_config
 from robosuite.utils.input_utils import *
 from robosuite.wrappers import DomainRandomizationWrapper
 
@@ -11,7 +12,6 @@ from robosuite.wrappers import DomainRandomizationWrapper
 macros.USING_INSTANCE_RANDOMIZATION = True
 
 if __name__ == "__main__":
-
     # Create dict to hold options that will be passed to env creation call
     options = {}
 
@@ -39,16 +39,12 @@ if __name__ == "__main__":
             for i in range(2):
                 print("Please choose Robot {}...\n".format(i))
                 options["robots"].append(choose_robots(exclude_bimanual=True))
-
+    # If a humanoid environment has been chosen, choose humanoid robots
+    elif "Humanoid" in options["env_name"]:
+        options["robots"] = choose_robots(use_humanoids=True)
     # Else, we simply choose a single (single-armed) robot to instantiate in the environment
     else:
         options["robots"] = choose_robots(exclude_bimanual=True)
-
-    # Choose controller
-    controller_name = choose_controller()
-
-    # Load the desired controller
-    options["controller_configs"] = load_controller_config(default_controller=controller_name)
 
     # initialize the task
     env = suite.make(
@@ -60,9 +56,16 @@ if __name__ == "__main__":
         control_freq=20,
         hard_reset=False,  # TODO: Not setting this flag to False brings up a segfault on macos or glfw error on linux
     )
-    env = DomainRandomizationWrapper(env)
+    env = DomainRandomizationWrapper(
+        env,
+        randomize_color=False,  # randomize_color currently only works for mujoco==3.1.1
+        randomize_camera=False,  # less jarring when visualizing
+        randomize_dynamics=False,
+    )
     env.reset()
     env.viewer.set_camera(camera_id=0)
+
+    max_frame_rate = 20  # Set the desired maximum frame rate
 
     # Get action limits
     low, high = env.action_spec
@@ -72,3 +75,4 @@ if __name__ == "__main__":
         action = np.random.uniform(low, high)
         obs, reward, done, _ = env.step(action)
         env.render()
+        time.sleep(1 / max_frame_rate)
