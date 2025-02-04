@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
+from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BoxObject, BallObject
 from robosuite.models.tasks import ManipulationTask
@@ -11,8 +11,8 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.environments.base import register_env
 
-
-class TrackCube(SingleArmEnv):
+@register_env
+class TrackCube(ManipulationEnv):
     """
     This class corresponds to tracking the position of a moving cube object by a robot arm.
     """
@@ -77,7 +77,7 @@ class TrackCube(SingleArmEnv):
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            mount_types=None,
+            base_types="NullMount",
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -328,9 +328,10 @@ class TrackCube(SingleArmEnv):
         elif self.reward_shaping:
 
             # reaching reward
-            gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-            target_pos = self._cube_xpos + self._target_offset
-            dist = np.linalg.norm(gripper_site_pos - target_pos)
+            dist_vec = self._target_offset + self._gripper_to_target(
+                gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=True
+            )
+            dist = np.linalg.norm(dist_vec)
             # reaching_reward = 1 - np.tanh(10.0 * dist)
             reaching_reward = -((2 * dist) ** 2)
             reward += reaching_reward
@@ -376,8 +377,10 @@ class TrackCube(SingleArmEnv):
         """
         Check if the task has been completed successfully.
         """
-        target_to_eef_pos = self._cube_xpos + self._target_offset - self._eef_xpos
-        return np.linalg.norm(target_to_eef_pos) < 0.05
+        target_to_eef_vec = self._target_offset + self._gripper_to_target(
+                gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=False
+            )
+        return np.linalg.norm(target_to_eef_vec) < 0.05
     
     @property
     def _cube_xpos(self):

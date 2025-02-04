@@ -211,7 +211,7 @@ class PickPlace(ManipulationEnv):
         renderer_config=None,
         use_touch_obs=False,
         use_tactile_obs=False,
-        mount_type="default",
+        base_types="default",
     ):
         # task settings
         self.single_object_mode = single_object_mode
@@ -253,13 +253,13 @@ class PickPlace(ManipulationEnv):
             assert robots == "Panda", "Tactile sensor is only implemented on Panda gripper"
             gripper_types = "PandaTactileGripper" 
 
-        self.mount_type = mount_type
+        self.base_types = base_types
 
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            base_types="default",
+            base_types=base_types,
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -536,7 +536,7 @@ class PickPlace(ManipulationEnv):
         super()._load_model()
 
         # Adjust base pose according to mount type
-        if self.mount_type is None:
+        if self.base_types == "NullMount":
             if "bins_nomount" in self.robots[0].robot_model.base_xpos_offset:
                 xpos = np.array([0, 0, self.bin1_pos[2]])
                 xpos -= self.robots[0].robot_model.base_xpos_offset["bins_nomount"]
@@ -606,13 +606,13 @@ class PickPlace(ManipulationEnv):
             bin_y_low += self.bin_size[1] / 4.0
             self.target_bin_placements[i, :] = [bin_x_low, bin_y_low, self.bin2_pos[2]]
 
-        if self.robots[0].gripper.name.startswith("Robotiq85"):
-            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_left_fingerpad_collision')
-            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_fingerpad_collision')
+        if list(self.robots[0].gripper.values())[0].name.startswith("Robotiq85"):
+            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_left_fingerpad_collision')
+            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_right_fingerpad_collision')
             self.fingerpad_offset = 0.02
-        elif self.robots[0].gripper.name.startswith("Panda"):
-            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_finger1_pad_collision')
-            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_finger2_pad_collision')
+        elif list(self.robots[0].gripper.values())[0].name.startswith("Panda"):
+            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_finger1_pad_collision')
+            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_finger2_pad_collision')
             self.fingerpad_offset = 0.007
 
     def _setup_observables(self):
@@ -667,7 +667,7 @@ class PickPlace(ManipulationEnv):
             actives.append(True)
 
         # Add gripper width observation
-        gripper_name = self.robots[0].gripper.name
+        gripper_name = list(self.robots[0].gripper.values())[0].name
         if gripper_name.startswith("Panda") or gripper_name.startswith("Robotiq85"):
 
             @sensor(modality=f"{pf}gripper_width")

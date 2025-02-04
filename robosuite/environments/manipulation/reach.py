@@ -3,7 +3,7 @@ from collections import OrderedDict
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
+from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BallObject
 from robosuite.models.tasks import ManipulationTask
@@ -13,7 +13,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler
 import robosuite.utils.transform_utils as T
 
 
-class Reach(SingleArmEnv):
+class Reach(ManipulationEnv):
     """
     This class corresponds to the lifting task for a single robot arm.
 
@@ -171,7 +171,7 @@ class Reach(SingleArmEnv):
         renderer="mujoco",
         renderer_config=None,
         target_pos=None,
-        mount_type="default",
+        base_types="default",
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -190,13 +190,13 @@ class Reach(SingleArmEnv):
             self.target_pos_min = [-0.05, -0.25, 0.8]
             self.target_pos_max = [0.15, 0.25, 1.2]
 
-        self.mount_type = mount_type
+        self.base_types = base_types
 
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            mount_types=mount_type,
+            base_types=base_types,
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -248,10 +248,10 @@ class Reach(SingleArmEnv):
         elif self.reward_shaping:
 
             # reaching reward
-            gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-            target_pos = self.sim.data.body_xpos[self.target_body_id]
-            dist = np.linalg.norm(gripper_site_pos - target_pos)
-            reaching_reward = 1 - np.tanh(10.0 * dist)
+            target_to_gripper_dist = self._gripper_to_target(
+                gripper=self.robots[0].gripper, target=self.target.root_body, target_type="body", return_distance=True
+            )
+            reaching_reward = 1 - np.tanh(10.0 * target_to_gripper_dist)
             # reaching_reward = -((2 * dist) ** 2)
             reward += reaching_reward
 
@@ -264,10 +264,9 @@ class Reach(SingleArmEnv):
         super()._load_model()
 
         # Adjust base pose according to mount type
-        if self.mount_type == None:
+        if self.base_types == "NullMount":
             if "table_nomount" in self.robots[0].robot_model.base_xpos_offset:
                 xpos = self.table_offset - self.robots[0].robot_model.base_xpos_offset["table_nomount"](self.table_full_size[0])
-                # xpos = self.table_offset - np.array([(self._eef_xpos[:2] - self.robots[0].base_pos[:2]).tolist() + [0]]) - np.array([0.1, 0, 0])
             else:
                 raise ValueError(f"Offset for table arena without mount is not defined in robot_model for {self.robots[0].robot_model.name}.\
                                  Please specify this offset to ensure initial eef position is same [-0.1, 0, table_height+0.1] across different robots.")
@@ -433,11 +432,13 @@ class Reach(SingleArmEnv):
         Returns:
             bool: True if target has been reached
         """
-        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-        target_pos = self.sim.data.body_xpos[self.target_body_id]
+
+        target_to_gripper_dist = self._gripper_to_target(
+            gripper=self.robots[0].gripper, target=self.target.root_body, target_type="body", return_distance=True
+        )
 
         # gripper is within a small distance to the target
-        return np.linalg.norm(gripper_site_pos - target_pos) < 0.03
+        return target_to_gripper_dist < 0.03
 
     def reset_target(self):
 

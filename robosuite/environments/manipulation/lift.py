@@ -178,7 +178,7 @@ class Lift(ManipulationEnv):
         use_touch_obs=False,
         use_tactile_obs=False,
         init_cube_pos=None,
-        mount_type="default",
+        base_types="default",
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -211,13 +211,13 @@ class Lift(ManipulationEnv):
 
         self.target_pos = np.array([0., 0., 1.0])
 
-        self.mount_type = mount_type
+        self.base_types = base_types
 
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
             controller_configs=controller_configs,
-            base_types="default",
+            base_types=base_types,
             gripper_types=gripper_types,
             initialization_noise=initialization_noise,
             use_camera_obs=use_camera_obs,
@@ -305,7 +305,7 @@ class Lift(ManipulationEnv):
         super()._load_model()
 
         # Adjust base pose according to mount type
-        if self.mount_type is None:
+        if self.base_types == "NullMount":
             if "table_nomount" in self.robots[0].robot_model.base_xpos_offset:
                 xpos = self.table_offset - self.robots[0].robot_model.base_xpos_offset["table_nomount"](self.table_full_size[0])
             else:
@@ -403,17 +403,17 @@ class Lift(ManipulationEnv):
         # Additional object references from this env
         self.cube_body_id = self.sim.model.body_name2id(self.cube.root_body)
 
-        if self.robots[0].gripper.name.startswith("Robotiq85"):
-            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_left_fingerpad_collision')
-            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_fingerpad_collision')
+        if list(self.robots[0].gripper.values())[0].name.startswith("Robotiq85"):
+            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_left_fingerpad_collision')
+            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_right_fingerpad_collision')
             self.fingerpad_offset = 0.02
-        elif self.robots[0].gripper.name.startswith("Panda"):
-            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_finger1_pad_collision')
-            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_finger2_pad_collision')
+        elif list(self.robots[0].gripper.values())[0].name.startswith("Panda"):
+            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_finger1_pad_collision')
+            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_finger2_pad_collision')
             self.fingerpad_offset = 0.007
-        elif self.robots[0].gripper.name.startswith("Rethink"):
-            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_l_fingerpad_g0')
-            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_r_fingerpad_g0')
+        elif list(self.robots[0].gripper.values())[0].name.startswith("Rethink"):
+            self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_l_fingerpad_g0')
+            self.fingerpad_id2 = self.sim.model.geom_name2id('gripper0_right_r_fingerpad_g0')
             self.fingerpad_offset = 0.02
 
     def _setup_observables(self):
@@ -467,7 +467,7 @@ class Lift(ManipulationEnv):
             actives.append(True)
 
         # Add gripper width observation
-        gripper_name = self.robots[0].gripper.name
+        gripper_name = list(self.robots[0].gripper.values())[0].name
         if gripper_name.startswith("Panda") or gripper_name.startswith("Robotiq85") or gripper_name.startswith("Rethink"):
 
             @sensor(modality=f"{pf}gripper_width")
@@ -535,9 +535,11 @@ class Lift(ManipulationEnv):
                 for arm_pf, full_pf in zip(arm_prefixes, full_prefixes)
             ]
             names = [s.__name__ for s in sensors]
+            enableds = [True] * len(sensors)
+            actives = [True] * len(sensors)
 
             # Create observables
-            for name, s in zip(names, sensors):
+            for name, s, enabled, active in zip(names, sensors, enableds, actives):
                 observables[name] = Observable(
                     name=name,
                     sensor=s,
