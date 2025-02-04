@@ -178,7 +178,7 @@ class Lift(ManipulationEnv):
         use_touch_obs=False,
         use_tactile_obs=False,
         init_cube_pos=None,
-        base_types="default",
+        base_types="NullMount",
     ):
         # settings for table top
         self.table_full_size = table_full_size
