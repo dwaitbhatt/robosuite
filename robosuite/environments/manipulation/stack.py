@@ -144,7 +144,7 @@ class Stack(ManipulationEnv):
         controller_configs=None,
         gripper_types="default",
         initialization_noise="default",
-        table_full_size=(0.8, 0.8, 0.05),
+        table_full_size=(0.76, 1.52, 0.05),
         table_friction=(1.0, 5e-3, 1e-4),
         table_offset=(0, 0, 0.8),
         use_camera_obs=True,

@@ -5,6 +5,7 @@ import numpy as np
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BoxObject
+from robosuite.models.objects.composite import Bin
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.observables import Observable, sensor
@@ -25,7 +26,7 @@ class PickPlaceCube(ManipulationEnv):
         controller_configs=None,
         gripper_types="default",
         initialization_noise="default",
-        table_full_size=(0.8, 0.8, 0.05),
+        table_full_size=(0.76, 1.52, 0.05),
         table_friction=(1., 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
@@ -62,8 +63,9 @@ class PickPlaceCube(ManipulationEnv):
         # object placement initializer
         self.placement_initializer_cube = placement_initializer
 
+        # object sizes matching the real world
         self.cube_half_size = 0.02
-        self.target_pad_half_size = 0.03
+        self.target_bin_full_size = (0.145, 0.21, 0.06)
 
         super().__init__(
             robots=robots,
@@ -103,7 +105,7 @@ class PickPlaceCube(ManipulationEnv):
         )
 
         # Set table color after creating the arena
-        mujoco_arena.table_visual.set("rgba", "0.1 0.1 0.1 1")
+        # mujoco_arena.table_visual.set("rgba", "0.1 0.1 0.1 1")
 
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
@@ -134,41 +136,18 @@ class PickPlaceCube(ManipulationEnv):
             mat_attrib=mat_attrib_wood,
         )
 
-        tex_attrib_paper = {
-            "type": "2d",
-        }
-        mat_attrib_paper = {
-            "texrepeat": "1 1",
-            "specular": "0",
-            "shininess": "0",
-        }
-        paper = CustomMaterial(
-            texture="PlasterWhite",
-            tex_name="paper",
-            mat_name="paper_mat",
-            tex_attrib=tex_attrib_paper,
-            mat_attrib=mat_attrib_paper,
-        )
-        
         self.cube = BoxObject(
             name="cube",
             size=[self.cube_half_size] * 3,
             rgba=[1, 0, 0, 1],
             material=redwood,
         )
-
-        self.target_pad = BoxObject(
-            name="target_pad",
-            size=[self.target_pad_half_size, self.target_pad_half_size, 0.001],
-            rgba=[0.9, 0.9, 0.9, 1],
-            material=paper,
-        )
         
         # Similar to Maniskill, cube is always behind the target in x
         self.placement_initializer_cube = UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=self.cube,
-            x_range=(-0.05, 0.1),
+            x_range=(-0.1, 0.05),
             y_range=(-0.25, 0.25),
             rotation=None,
             ensure_object_boundary_in_range=False,
@@ -177,10 +156,19 @@ class PickPlaceCube(ManipulationEnv):
             z_offset=0.01,
         )
 
-        self.placement_initializer_target_pad = UniformRandomSampler(
+        self.target_bin = Bin(
+            name="target_bin",
+            bin_size=self.target_bin_full_size,
+            wall_thickness=0.005,
+            transparent_walls=False,
+            use_texture=False,
+            rgba=[1, 1, 1, 1]
+        )
+
+        self.placement_initializer_target_bin = UniformRandomSampler(
             name="ObjectSampler",
-            mujoco_objects=self.target_pad,
-            x_range=(0.15, 0.3),
+            mujoco_objects=self.target_bin,
+            x_range=(0.18, 0.25),
             y_range=(-0.25, 0.25),
             rotation=0,
             ensure_object_boundary_in_range=True,
@@ -193,7 +181,7 @@ class PickPlaceCube(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.cube, self.target_pad],
+            mujoco_objects=[self.cube, self.target_bin],
         )
 
     def _setup_observables(self):
@@ -258,9 +246,9 @@ class PickPlaceCube(ManipulationEnv):
             cube_pos, cube_quat, _ = cube_placement[self.cube.name]
             self.sim.data.set_joint_qpos(self.cube.joints[0], np.concatenate([cube_pos, cube_quat]))
             
-            target_pad_placement = self.placement_initializer_target_pad.sample()
-            target_pad_pos, target_pad_quat, _ = target_pad_placement[self.target_pad.name]
-            self.sim.data.set_joint_qpos(self.target_pad.joints[0], np.concatenate([target_pad_pos, target_pad_quat]))
+            target_bin_placement = self.placement_initializer_target_bin.sample()
+            target_bin_pos, target_bin_quat, _ = target_bin_placement[self.target_bin.name]
+            self.sim.data.set_joint_qpos(self.target_bin.joints[0], np.concatenate([target_bin_pos, target_bin_quat]))
             
     def _setup_references(self):
         """
@@ -270,7 +258,7 @@ class PickPlaceCube(ManipulationEnv):
 
         # Additional object references from this env
         self.cube_body_id = self.sim.model.body_name2id("cube_main")
-        self.target_pad_body_id = self.sim.model.body_name2id("target_pad_main")
+        self.target_bin_body_id = self.sim.model.body_name2id("target_bin_root")
         
     def staged_rewards(self, action):
         """
@@ -300,8 +288,8 @@ class PickPlaceCube(ManipulationEnv):
 
         # hover reward
         r_hover = 0.0
-        x_check = np.abs(self._cube_xpos[0] - self._target_pos[0]) < self.target_pad_half_size
-        y_check = np.abs(self._cube_xpos[1] - self._target_pos[1]) < self.target_pad_half_size
+        x_check = np.abs(self._cube_xpos[0] - self._target_pos[0]) < self.target_bin_full_size[0]/2
+        y_check = np.abs(self._cube_xpos[1] - self._target_pos[1]) < self.target_bin_full_size[1]/2
         xy_dist = np.linalg.norm(self._cube_xpos[:2] - self._target_pos[:2])
         if x_check and y_check:
             r_hover = lift_mult + (1 - np.tanh(10.0 * xy_dist)) * (hover_mult - lift_mult)
@@ -356,10 +344,10 @@ class PickPlaceCube(ManipulationEnv):
         return self.sim.data.body_xpos[self.cube_body_id]
     
     @property
-    def _target_pad_xpos(self):
-        return self.sim.data.body_xpos[self.target_pad_body_id]
+    def _target_bin_xpos(self):
+        return self.sim.data.body_xpos[self.target_bin_body_id]
     
     @property
     def _target_pos(self):
-        return self._target_pad_xpos + np.array([0, 0, self.cube_half_size])
+        return self._target_bin_xpos + np.array([0, 0, self.cube_half_size])
     

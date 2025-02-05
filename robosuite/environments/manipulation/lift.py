@@ -149,7 +149,7 @@ class Lift(ManipulationEnv):
         controller_configs=None,
         gripper_types="default",
         initialization_noise="default",
-        table_full_size=(0.8, 0.8, 0.05),
+        table_full_size=(0.76, 1.52, 0.05),
         table_friction=(1.0, 5e-3, 1e-4),
         table_offset=(0, 0, 0.8),
         use_camera_obs=True,
@@ -389,7 +389,7 @@ class Lift(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.cube, self.target],
+            mujoco_objects=[self.cube],
         )
 
     def _setup_references(self):
