@@ -34,6 +34,20 @@ class CanObject(MujocoXMLObject):
         )
 
 
+class RealCanObject(MujocoXMLObject):
+    """
+    Custom Can object
+    """
+    def __init__(self, name):
+        super().__init__(
+            xml_path_completion("objects/can_real.xml"),
+            name=name,
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
+
+
 class LemonObject(MujocoXMLObject):
     """
     Lemon object

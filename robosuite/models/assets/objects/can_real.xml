@@ -1,0 +1,16 @@
+<mujoco model="can">
+  <asset>
+    <mesh file="meshes/can_real.stl" name="can_mesh" scale="0.001 0.001 0.001"/>
+    <material name="coke" reflectance="0.7" texrepeat="1 1" texuniform="true" rgba="0.13 0.5 0.28 1"/>
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <geom pos="0 0 0" mesh="can_mesh" type="mesh" solimp="0.998 0.998 0.001" solref="0.001 1" density="100" friction="0.95 0.3 0.1" material="coke" group="0" condim="4"/>
+      </body>
+      <site rgba="0 0 0 0" size="0.0005" pos="110 110 0" name="bottom_site"/>
+      <site rgba="0 0 0 0" size="0.0005" pos="110 110 122.50" name="top_site"/>
+      <site rgba="0 0 0 0" size="0.0005" pos="110 110 60" name="horizontal_radius_site"/>
+    </body>
+  </worldbody>
+</mujoco>

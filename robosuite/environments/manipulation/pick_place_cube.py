@@ -4,7 +4,7 @@ import numpy as np
 
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
-from robosuite.models.objects import BoxObject
+from robosuite.models.objects import BoxObject, RealCanObject
 from robosuite.models.objects.composite import Bin
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -12,9 +12,8 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.environments.base import register_env
 
-# TODO: Copied from track_cube.py, need to modify to pick and place cube
 @register_env
-class PickPlaceCube(ManipulationEnv):
+class PickPlaceReal(ManipulationEnv):
     """
     This class corresponds to a pick and place task matching the real-world environment.
     """
@@ -47,6 +46,7 @@ class PickPlaceCube(ManipulationEnv):
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
+        item_type="cube",
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -61,10 +61,15 @@ class PickPlaceCube(ManipulationEnv):
         self.use_object_obs = use_object_obs
 
         # object placement initializer
-        self.placement_initializer_cube = placement_initializer
+        self.placement_initializer_item = placement_initializer
 
         # object sizes matching the real world
-        self.cube_half_size = 0.02
+        assert item_type in ["cube", "can"], "item_type must be either 'cube' or 'can'"
+        self.item_type = item_type
+        if item_type == "cube":
+            self.item_half_len = 0.02
+        elif item_type == "can":
+            self.item_half_len = 0.06
         self.target_bin_full_size = (0.145, 0.21, 0.06)
 
         super().__init__(
@@ -136,17 +141,22 @@ class PickPlaceCube(ManipulationEnv):
             mat_attrib=mat_attrib_wood,
         )
 
-        self.cube = BoxObject(
-            name="cube",
-            size=[self.cube_half_size] * 3,
-            rgba=[1, 0, 0, 1],
-            material=redwood,
-        )
+        if self.item_type == "cube":
+            self.item = BoxObject(
+                name="item",
+                size=[self.item_half_len] * 3,
+                rgba=[1, 0, 0, 1],
+                material=redwood,
+            )
+        elif self.item_type == "can":
+            self.item = RealCanObject(
+                name="item",
+            )
         
-        # Similar to Maniskill, cube is always behind the target in x
-        self.placement_initializer_cube = UniformRandomSampler(
+        # Similar to Maniskill, item is always behind the target in x
+        self.placement_initializer_item = UniformRandomSampler(
             name="ObjectSampler",
-            mujoco_objects=self.cube,
+            mujoco_objects=self.item,
             x_range=(-0.1, 0.05),
             y_range=(-0.25, 0.25),
             rotation=None,
@@ -181,7 +191,7 @@ class PickPlaceCube(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.cube, self.target_bin],
+            mujoco_objects=[self.item, self.target_bin],
         )
 
     def _setup_observables(self):
@@ -198,14 +208,14 @@ class PickPlaceCube(ManipulationEnv):
             pf = self.robots[0].robot_model.naming_prefix
 
             @sensor(modality="object")
-            def cube_pos(obs_cache):
-                return self._cube_xpos
+            def item_pos(obs_cache):
+                return self._item_xpos
 
             @sensor(modality="object")
-            def cube_to_eef_pos(obs_cache):
+            def item_to_eef_pos(obs_cache):
                 return (
-                    obs_cache[f"{pf}eef_pos"] - obs_cache["cube_pos"]
-                    if "cube_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
+                    obs_cache[f"{pf}eef_pos"] - obs_cache["item_pos"]
+                    if "item_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
                     else np.zeros(3)
                 )
 
@@ -221,8 +231,8 @@ class PickPlaceCube(ManipulationEnv):
                     else np.zeros(3)
                 )
 
-            sensors = [cube_pos, cube_to_eef_pos, target_pos, target_to_eef_pos]
-            names = [f"cube_pos", f"cube_to_{pf}eef_pos", f"target_pos", f"target_to_{pf}eef_pos"]
+            sensors = [item_pos, item_to_eef_pos, target_pos, target_to_eef_pos]
+            names = [f"item_pos", f"item_to_{pf}eef_pos", f"target_pos", f"target_to_{pf}eef_pos"]
 
             # Create observables
             for name, s in zip(names, sensors):
@@ -240,11 +250,11 @@ class PickPlaceCube(ManipulationEnv):
         """
         super()._reset_internal()
 
-        # Reset cube position using placement initializer
+        # Reset item position using placement initializer
         if not self.deterministic_reset:
-            cube_placement = self.placement_initializer_cube.sample()
-            cube_pos, cube_quat, _ = cube_placement[self.cube.name]
-            self.sim.data.set_joint_qpos(self.cube.joints[0], np.concatenate([cube_pos, cube_quat]))
+            item_placement = self.placement_initializer_item.sample()
+            item_pos, item_quat, _ = item_placement[self.item.name]
+            self.sim.data.set_joint_qpos(self.item.joints[0], np.concatenate([item_pos, item_quat]))
             
             target_bin_placement = self.placement_initializer_target_bin.sample()
             target_bin_pos, target_bin_quat, _ = target_bin_placement[self.target_bin.name]
@@ -257,7 +267,7 @@ class PickPlaceCube(ManipulationEnv):
         super()._setup_references()
 
         # Additional object references from this env
-        self.cube_body_id = self.sim.model.body_name2id("cube_main")
+        self.item_body_id = self.sim.model.body_name2id("item_main")
         self.target_bin_body_id = self.sim.model.body_name2id("target_bin_root")
         
     def staged_rewards(self, action):
@@ -272,25 +282,25 @@ class PickPlaceCube(ManipulationEnv):
 
         # reaching reward
         dist = self._gripper_to_target(
-            gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=True
+            gripper=self.robots[0].gripper, target=self.item.root_body, target_type="body", return_distance=True
         )
         r_reach = (1 - np.tanh(10.0 * dist)) * reach_mult
 
         # grasping reward
-        r_grasp = int(self._check_grasp(self.robots[0].gripper, self.cube.root_body)) * grasp_mult
+        r_grasp = int(self._check_grasp(self.robots[0].gripper, self.item.root_body)) * grasp_mult
 
         # lifting reward
         r_lift = 0.0
         if r_grasp > 0:
             z_target = self._target_pos[2] + 0.1
-            z_dist = np.maximum(z_target - self._cube_xpos[2], 0.0)
+            z_dist = np.maximum(z_target - self._item_xpos[2], 0.0)
             r_lift = grasp_mult + (1 - np.tanh(15.0 * z_dist)) * (lift_mult - grasp_mult)
 
         # hover reward
         r_hover = 0.0
-        x_check = np.abs(self._cube_xpos[0] - self._target_pos[0]) < self.target_bin_full_size[0]/2
-        y_check = np.abs(self._cube_xpos[1] - self._target_pos[1]) < self.target_bin_full_size[1]/2
-        xy_dist = np.linalg.norm(self._cube_xpos[:2] - self._target_pos[:2])
+        x_check = np.abs(self._item_xpos[0] - self._target_pos[0]) < self.target_bin_full_size[0]/2
+        y_check = np.abs(self._item_xpos[1] - self._target_pos[1]) < self.target_bin_full_size[1]/2
+        xy_dist = np.linalg.norm(self._item_xpos[:2] - self._target_pos[:2])
         if x_check and y_check:
             r_hover = lift_mult + (1 - np.tanh(10.0 * xy_dist)) * (hover_mult - lift_mult)
 
@@ -315,10 +325,10 @@ class PickPlaceCube(ManipulationEnv):
         """
         Check if the task has been completed successfully.
         """
-        cube_to_target_dist = np.linalg.norm(self._cube_xpos - self._target_pos)
+        item_to_target_dist = np.linalg.norm(self._item_xpos - self._target_pos)
         threshold = 0.005
-        is_cube_grasped = self._check_grasp(self.robots[0].gripper, self.cube.root_body)
-        return (not is_cube_grasped) and (cube_to_target_dist <= threshold)
+        is_item_grasped = self._check_grasp(self.robots[0].gripper, self.item.root_body)
+        return (not is_item_grasped) and (item_to_target_dist <= threshold)
     
 
     def _get_eef_xpos(self, arm):
@@ -334,14 +344,14 @@ class PickPlaceCube(ManipulationEnv):
         return np.array(self.sim.data.site_xpos[self.robots[0].eef_site_id[arm]])
     
     @property
-    def _cube_xpos(self):
+    def _item_xpos(self):
         """
-        Grabs the position of the cube.
+        Grabs the position of the item.
 
         Returns:
-            np.array: Cube (x,y,z)
+            np.array: item (x,y,z)
         """
-        return self.sim.data.body_xpos[self.cube_body_id]
+        return self.sim.data.body_xpos[self.item_body_id]
     
     @property
     def _target_bin_xpos(self):
@@ -349,5 +359,5 @@ class PickPlaceCube(ManipulationEnv):
     
     @property
     def _target_pos(self):
-        return self._target_bin_xpos + np.array([0, 0, self.cube_half_size])
+        return self._target_bin_xpos + np.array([0, 0, self.item_half_len])
     

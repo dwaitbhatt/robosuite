@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation as R
 
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
-from robosuite.models.objects import BoxObject, BallObject
+from robosuite.models.objects import BoxObject, BallObject, RealCanObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.observables import Observable, sensor
@@ -58,7 +58,7 @@ class Lift(ManipulationEnv):
 
         use_camera_obs (bool): if True, every observation includes rendered image(s)
 
-        use_object_obs (bool): if True, include object (cube) information in
+        use_object_obs (bool): if True, include object (item) information in
             the observation.
 
         reward_scale (None or float): Scales the normalized reward function by the amount specified.
@@ -177,8 +177,9 @@ class Lift(ManipulationEnv):
         renderer_config=None,
         use_touch_obs=False,
         use_tactile_obs=False,
-        init_cube_pos=None,
+        init_item_pos=None,
         base_types="NullMount",
+        item_type="cube",
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -207,11 +208,14 @@ class Lift(ManipulationEnv):
             assert robots == "Panda", "Tactile sensor is only implemented on Panda gripper"
             gripper_types = "PandaTactileGripper" 
 
-        self.init_cube_pos = init_cube_pos
+        self.init_item_pos = init_item_pos
 
         self.target_pos = np.array([0., 0., 1.0])
 
         self.base_types = base_types
+
+        assert item_type in ["cube", "can"], "item_type must be either 'cube' or 'can'"
+        self.item_type = item_type
 
         super().__init__(
             robots=robots,
@@ -247,13 +251,13 @@ class Lift(ManipulationEnv):
 
         Sparse un-normalized reward:
 
-            - a discrete reward of 2.25 is provided if the cube is lifted
+            - a discrete reward of 2.25 is provided if the item is lifted
 
         Un-normalized summed components if using reward shaping:
 
-            - Reaching: in [0, 1], to encourage the arm to reach the cube
-            - Grasping: in {0, 0.25}, non-zero if arm is grasping the cube
-            - Lifting: in {0, 1}, non-zero if arm has lifted the cube
+            - Reaching: in [0, 1], to encourage the arm to reach the item
+            - Grasping: in {0, 0.25}, non-zero if arm is grasping the item
+            - Lifting: in {0, 1}, non-zero if arm has lifted the item
 
         The sparse reward only consists of the lifting component.
 
@@ -277,18 +281,18 @@ class Lift(ManipulationEnv):
 
             # reaching reward
             dist = self._gripper_to_target(
-                gripper=self.robots[0].gripper, target=self.cube.root_body, target_type="body", return_distance=True
+                gripper=self.robots[0].gripper, target=self.item.root_body, target_type="body", return_distance=True
             )
             reaching_reward = 1 - np.tanh(10.0 * dist)
             reward += reaching_reward
 
             # grasping reward
-            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.cube):
+            if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.item):
                 reward += 0.25
             
-            # move cube to target reward
-            cube_pos = self.sim.data.body_xpos[self.cube_body_id]
-            dist = np.linalg.norm(self.target_pos - cube_pos)
+            # move item to target reward
+            item_pos = self.sim.data.body_xpos[self.item_body_id]
+            dist = np.linalg.norm(self.target_pos - item_pos)
             reach_target_reward = 1 - np.tanh(10.0 * dist)
             reward += reach_target_reward
 
@@ -341,31 +345,37 @@ class Lift(ManipulationEnv):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
-        self.cube = BoxObject(
-            name="cube",
-            # size_min=[0.025, 0.025, 0.025],  # [0.015, 0.015, 0.015],
-            # size_max=[0.025, 0.025, 0.025],  # [0.018, 0.018, 0.018])
-            size_min=[0.02, 0.02, 0.02],  # [0.015, 0.015, 0.015],
-            size_max=[0.02, 0.02, 0.02],  # [0.018, 0.018, 0.018])
-            rgba=[1, 0, 0, 1],
-            material=redwood,
-        )
 
-        if self.init_cube_pos is None:
+        if self.item_type == "cube":
+            self.item = BoxObject(
+                name="item",
+                # size_min=[0.025, 0.025, 0.025],  # [0.015, 0.015, 0.015],
+                # size_max=[0.025, 0.025, 0.025],  # [0.018, 0.018, 0.018])
+                size_min=[0.02, 0.02, 0.02],  # [0.015, 0.015, 0.015],
+                size_max=[0.02, 0.02, 0.02],  # [0.018, 0.018, 0.018])
+                rgba=[1, 0, 0, 1],
+                material=redwood,
+            )
+        elif self.item_type == "can":
+            self.item = RealCanObject(
+                name="item"
+            )
+
+        if self.init_item_pos is None:
             x_range = [-0.05, 0.05]
             y_range = [-0.05, 0.05]     
         else:
-            x_range = [self.init_cube_pos[0], self.init_cube_pos[0]]
-            y_range = [self.init_cube_pos[1], self.init_cube_pos[1]]   
+            x_range = [self.init_item_pos[0], self.init_item_pos[0]]
+            y_range = [self.init_item_pos[1], self.init_item_pos[1]]   
 
         # Create placement initializer
         if self.placement_initializer is not None:
             self.placement_initializer.reset()
-            self.placement_initializer.add_objects(self.cube)
+            self.placement_initializer.add_objects(self.item)
         else:
             self.placement_initializer = UniformRandomSampler(
                 name="ObjectSampler",
-                mujoco_objects=self.cube,
+                mujoco_objects=self.item,
                 x_range=x_range,
                 y_range=y_range,
                 rotation=0,
@@ -389,7 +399,7 @@ class Lift(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=[self.cube],
+            mujoco_objects=[self.item],
         )
 
     def _setup_references(self):
@@ -401,7 +411,7 @@ class Lift(ManipulationEnv):
         super()._setup_references()
 
         # Additional object references from this env
-        self.cube_body_id = self.sim.model.body_name2id(self.cube.root_body)
+        self.item_body_id = self.sim.model.body_name2id(self.item.root_body)
 
         if list(self.robots[0].gripper.values())[0].name.startswith("Robotiq85"):
             self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_left_fingerpad_collision')
@@ -500,16 +510,16 @@ class Lift(ManipulationEnv):
             enableds.append(True)
             actives.append(False)
 
-            # cube-related observables
+            # item-related observables
             @sensor(modality=modality)
-            def cube_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cube_body_id])
+            def item_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.item_body_id])
 
             @sensor(modality=modality)
-            def cube_quat(obs_cache):
-                return T.convert_quat(np.array(self.sim.data.body_xquat[self.cube_body_id]), to="xyzw")
+            def item_quat(obs_cache):
+                return T.convert_quat(np.array(self.sim.data.body_xquat[self.item_body_id]), to="xyzw")
 
-            obj_name = 'cube'
+            obj_name = 'item'
             @sensor(modality=modality)
             def obj_to_eef_pos(obs_cache):
                 # Immediately return default value if cache is empty
@@ -524,14 +534,14 @@ class Lift(ManipulationEnv):
                 rel_pos = obs_cache[f"{pf}eef_pos"] - obs_cache[f"{obj_name}_pos"]
                 return rel_pos  
 
-            sensors = [cube_pos, cube_quat]
+            sensors = [item_pos, item_quat]
 
             arm_prefixes = self._get_arm_prefixes(self.robots[0], include_robot_name=False)
             full_prefixes = self._get_arm_prefixes(self.robots[0])
 
-            # gripper to cube position sensor; one for each arm
+            # gripper to item position sensor; one for each arm
             sensors += [
-                self._get_obj_eef_sensor(full_pf, "cube_pos", f"{arm_pf}gripper_to_cube_pos", modality)
+                self._get_obj_eef_sensor(full_pf, "item_pos", f"{arm_pf}gripper_to_item_pos", modality)
                 for arm_pf, full_pf in zip(arm_prefixes, full_prefixes)
             ]
             names = [s.__name__ for s in sensors]
@@ -568,7 +578,7 @@ class Lift(ManipulationEnv):
 
     def visualize(self, vis_settings):
         """
-        In addition to super call, visualize gripper site proportional to the distance to the cube.
+        In addition to super call, visualize gripper site proportional to the distance to the item.
 
         Args:
             vis_settings (dict): Visualization keywords mapped to T/F, determining whether that specific
@@ -578,25 +588,25 @@ class Lift(ManipulationEnv):
         # Run superclass method first
         super().visualize(vis_settings=vis_settings)
 
-        # Color the gripper visualization site according to its distance to the cube
+        # Color the gripper visualization site according to its distance to the item
         if vis_settings["grippers"]:
-            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cube)
+            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.item)
 
     def _check_success(self):
         """
-        Check if cube has been lifted.
+        Check if item has been lifted.
 
         Returns:
-            bool: True if cube has been lifted
+            bool: True if item has been lifted
         """
-        # cube_height = self.sim.data.body_xpos[self.cube_body_id][2]
+        # item_height = self.sim.data.body_xpos[self.item_body_id][2]
         # table_height = self.model.mujoco_arena.table_offset[2]
 
-        # # cube is higher than the table top above a margin
-        # return cube_height > table_height + 0.04
+        # # item is higher than the table top above a margin
+        # return item_height > table_height + 0.04
 
-        cube_pos = self.sim.data.body_xpos[self.cube_body_id]
-        dist = np.linalg.norm(self.target_pos - cube_pos)
+        item_pos = self.sim.data.body_xpos[self.item_body_id]
+        dist = np.linalg.norm(self.target_pos - item_pos)
         return dist < 0.02
 
     # @property

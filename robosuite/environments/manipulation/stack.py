@@ -5,7 +5,7 @@ from scipy.spatial.transform import Rotation as R
 
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
-from robosuite.models.objects import BoxObject
+from robosuite.models.objects import BoxObject, RealCanObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.observables import Observable, sensor
@@ -173,6 +173,8 @@ class Stack(ManipulationEnv):
         use_touch_obs=False,
         use_tactile_obs=False,
         base_types="NullMount",
+        itemA_type="cube",
+        itemB_type="cube",
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -203,6 +205,11 @@ class Stack(ManipulationEnv):
             gripper_types = "PandaTactileGripper" 
 
         self.base_types = base_types
+
+        assert itemA_type in ["cube", "can"], "itemA_type must be either 'cube' or 'can'"
+        assert itemB_type in ["cube", "can"], "itemB_type must be either 'cube' or 'can'"
+        self.itemA_type = itemA_type
+        self.itemB_type = itemB_type
 
         super().__init__(
             robots=robots,
@@ -288,36 +295,36 @@ class Stack(ManipulationEnv):
                 - (float): reward for stacking
         """
         # reaching is successful when the gripper site is close to the center of the cube
-        cubeA_pos = self.sim.data.body_xpos[self.cubeA_body_id]
-        cubeB_pos = self.sim.data.body_xpos[self.cubeB_body_id]
+        itemA_pos = self.sim.data.body_xpos[self.itemA_body_id]
+        itemB_pos = self.sim.data.body_xpos[self.itemB_body_id]
         dist = min(
             [
-                np.linalg.norm(self.sim.data.site_xpos[self.robots[0].eef_site_id[arm]] - cubeA_pos)
+                np.linalg.norm(self.sim.data.site_xpos[self.robots[0].eef_site_id[arm]] - itemA_pos)
                 for arm in self.robots[0].arms
             ]
         )
         r_reach = (1 - np.tanh(10.0 * dist)) * 0.25
 
         # grasping reward
-        grasping_cubeA = self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.cubeA)
-        if grasping_cubeA:
+        grasping_itemA = self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.itemA)
+        if grasping_itemA:
             r_reach += 0.25
 
         # lifting is successful when the cube is above the table top by a margin
-        cubeA_height = cubeA_pos[2]
+        itemA_height = itemA_pos[2]
         table_height = self.table_offset[2]
-        cubeA_lifted = cubeA_height > table_height + 0.04
-        r_lift = 1.0 if cubeA_lifted else 0.0
+        itemA_lifted = itemA_height > table_height + 0.04
+        r_lift = 1.0 if itemA_lifted else 0.0
 
-        # Aligning is successful when cubeA is right above cubeB
-        if cubeA_lifted:
-            horiz_dist = np.linalg.norm(np.array(cubeA_pos[:2]) - np.array(cubeB_pos[:2]))
+        # Aligning is successful when itemA is right above itemB
+        if itemA_lifted:
+            horiz_dist = np.linalg.norm(np.array(itemA_pos[:2]) - np.array(itemB_pos[:2]))
             r_lift += 0.5 * (1 - np.tanh(horiz_dist))
 
         # stacking is successful when the block is lifted and the gripper is not holding the object
         r_stack = 0
-        cubeA_touching_cubeB = self.check_contact(self.cubeA, self.cubeB)
-        if not grasping_cubeA and r_lift > 0 and cubeA_touching_cubeB:
+        itemA_touching_itemB = self.check_contact(self.itemA, self.itemB)
+        if not grasping_itemA and r_lift > 0 and itemA_touching_itemB:
             r_stack = 2.0
 
         return r_reach, r_lift, r_stack
@@ -372,35 +379,49 @@ class Stack(ManipulationEnv):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
-        self.cubeA = BoxObject(
-            name="cubeA",
-            size_min=[0.02, 0.02, 0.02],
-            size_max=[0.02, 0.02, 0.02],
-            rgba=[1, 0, 0, 1],
-            material=redwood,
-        )
-        self.cubeB = BoxObject(
-            name="cubeB",
-            size_min=[0.025, 0.025, 0.025],
-            size_max=[0.025, 0.025, 0.025],
-            rgba=[0, 1, 0, 1],
-            material=greenwood,
-        )
-        cubes = [self.cubeA, self.cubeB]
+
+        if self.itemA_type == "cube":
+            self.itemA = BoxObject(
+                name="itemA",
+                size_min=[0.02, 0.02, 0.02],
+                size_max=[0.02, 0.02, 0.02],
+                rgba=[1, 0, 0, 1],
+                material=redwood,
+            )
+        elif self.itemA_type == "can":
+            self.itemA = RealCanObject(
+                name="itemA",
+            )
+
+
+        if self.itemB_type == "cube":
+            self.itemB = BoxObject(
+                name="itemB",
+                size_min=[0.025, 0.025, 0.025],
+                size_max=[0.025, 0.025, 0.025],
+                rgba=[0, 1, 0, 1],
+                material=greenwood,
+            )
+        elif self.itemB_type == "can":
+            self.itemB = RealCanObject(
+                name="itemB",
+            )
+
+        items = [self.itemA, self.itemB]
         # Create placement initializer
         if self.placement_initializer is not None:
             self.placement_initializer.reset()
-            self.placement_initializer.add_objects(cubes)
+            self.placement_initializer.add_objects(items)
         else:
             self.placement_initializer = UniformRandomSampler(
                 name="ObjectSampler",
-                mujoco_objects=cubes,
+                mujoco_objects=items,
                 x_range=[-0.10, 0.10],
                 y_range=[-0.15, 0.15],
                 # rotation=None,
                 rotation=0,
                 ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
+                ensure_valid_placement=False,
                 reference_pos=self.table_offset,
                 z_offset=0.01,
             )
@@ -409,7 +430,7 @@ class Stack(ManipulationEnv):
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
-            mujoco_objects=cubes,
+            mujoco_objects=items,
         )
 
     def _setup_references(self):
@@ -421,8 +442,8 @@ class Stack(ManipulationEnv):
         super()._setup_references()
 
         # Additional object references from this env
-        self.cubeA_body_id = self.sim.model.body_name2id(self.cubeA.root_body)
-        self.cubeB_body_id = self.sim.model.body_name2id(self.cubeB.root_body)
+        self.itemA_body_id = self.sim.model.body_name2id(self.itemA.root_body)
+        self.itemB_body_id = self.sim.model.body_name2id(self.itemB.root_body)
 
         if list(self.robots[0].gripper.values())[0].name.startswith("Robotiq85"):
             self.fingerpad_id1 = self.sim.model.geom_name2id('gripper0_right_left_fingerpad_collision')
@@ -520,37 +541,37 @@ class Stack(ManipulationEnv):
 
             # position and rotation of the first cube
             @sensor(modality=modality)
-            def cubeA_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cubeA_body_id])
+            def itemA_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.itemA_body_id])
 
             @sensor(modality=modality)
-            def cubeA_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.cubeA_body_id]), to="xyzw")
+            def itemA_quat(obs_cache):
+                return convert_quat(np.array(self.sim.data.body_xquat[self.itemA_body_id]), to="xyzw")
 
             @sensor(modality=modality)
-            def cubeB_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cubeB_body_id])
+            def itemB_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.itemB_body_id])
 
             @sensor(modality=modality)
-            def cubeB_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.cubeB_body_id]), to="xyzw")
+            def itemB_quat(obs_cache):
+                return convert_quat(np.array(self.sim.data.body_xquat[self.itemB_body_id]), to="xyzw")
 
             @sensor(modality=modality)
-            def cubeA_to_cubeB(obs_cache):
+            def itemA_to_itemB(obs_cache):
                 return (
-                    obs_cache["cubeB_pos"] - obs_cache["cubeA_pos"]
-                    if "cubeA_pos" in obs_cache and "cubeB_pos" in obs_cache
+                    obs_cache["itemB_pos"] - obs_cache["itemA_pos"]
+                    if "itemA_pos" in obs_cache and "itemB_pos" in obs_cache
                     else np.zeros(3)
                 )
 
             arm_prefixes = self._get_arm_prefixes(self.robots[0], include_robot_name=False)
             full_prefixes = self._get_arm_prefixes(self.robots[0])
 
-            sensors = [cubeA_pos, cubeA_quat, cubeB_pos, cubeB_quat, cubeA_to_cubeB]
+            sensors = [itemA_pos, itemA_quat, itemB_pos, itemB_quat, itemA_to_itemB]
             sensors += [
                 self._get_obj_eef_sensor(full_pf, f"{cube}_pos", f"{arm_pf}gripper_to_{cube}", modality)
                 for arm_pf, full_pf in zip(arm_prefixes, full_prefixes)
-                for cube in ["cubeA", "cubeB"]
+                for cube in ["itemA", "itemB"]
             ]
             names = [s.__name__ for s in sensors]
 
@@ -588,4 +609,4 @@ class Stack(ManipulationEnv):
 
         # Color the gripper visualization site according to its distance to the cube
         if vis_settings["grippers"]:
-            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
+            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.itemA)
