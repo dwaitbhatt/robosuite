@@ -48,7 +48,10 @@ class xArm6(ManipulatorModel):
         # return np.array([3.74565364e-03, -9.37793861e-01, -2.82236445e-03, 6.77735371e-04, 9.08002899e-01, -8.60226130e-03])
 
         # For EEF z 0.05 above table when xarm6 is placed on table directly
-        return np.array([8.84830716e-03, -6.66687447e-01, 4.89064751e-02, 1.94762656e-04, 5.84571386e-01, -3.86422130e-03])
+        # np.array([8.84830716e-03, -6.66687447e-01, 4.89064751e-02, 1.94762656e-04, 5.84571386e-01, -3.86422130e-03])
+
+        # From maniskill experiments
+        return np.array([6.672368e-4, 2.2206e-1, -1.2311444, 1.6927806e-4, 1.0088931, 7.304605e-4])
 
     @property
     def base_xpos_offset(self):

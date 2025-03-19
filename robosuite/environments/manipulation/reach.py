@@ -187,8 +187,8 @@ class Reach(ManipulationEnv):
 
         self.target_pos = target_pos
         if self.target_pos is None:
-            self.target_pos_min = [-0.05, -0.25, 0.8]
-            self.target_pos_max = [0.15, 0.25, 1.2]
+            self.target_pos_min = [-0.05, -0.25, 0.73]
+            self.target_pos_max = [0.15, 0.25, 0.95]
 
         self.base_types = base_types
 
@@ -255,6 +255,12 @@ class Reach(ManipulationEnv):
             # reaching_reward = -((2 * dist) ** 2)
             reward += reaching_reward
 
+            # penalize for non-zero joint velocities once close to target
+            if target_to_gripper_dist < 0.03:
+                qvels = np.linalg.norm(self.robots[0]._joint_velocities)
+                static_reward = 1 - np.tanh(10.0 * qvels)
+                reward += static_reward
+
         return reward
 
     def _load_model(self):
@@ -286,9 +292,9 @@ class Reach(ManipulationEnv):
 
         # Set target location without physical objects
         if self.target_pos is None:
-            target_pos = np.random.uniform(low=self.target_pos_min, high=self.target_pos_max)
+            self.target_pos = np.random.uniform(low=self.target_pos_min, high=self.target_pos_max)
         else:
-            target_pos = self.target_pos
+            self.target_pos = self.target_pos
 
         self.target = BallObject(
             name="target",
@@ -297,7 +303,7 @@ class Reach(ManipulationEnv):
             obj_type='visual',
             joints=None
         )
-        self.target.get_obj().set("pos", " ".join([str(num) for num in target_pos]))
+        self.target.get_obj().set("pos", " ".join([str(num) for num in self.target_pos]))
         
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
@@ -410,6 +416,9 @@ class Reach(ManipulationEnv):
         """
         Resets simulation internal configurations.
         """
+        self.target_pos = np.random.uniform(low=self.target_pos_min, high=self.target_pos_max)
+        self.target.get_obj().set("pos", " ".join([str(num) for num in self.target_pos]))
+
         super()._reset_internal()
 
 
@@ -430,15 +439,16 @@ class Reach(ManipulationEnv):
         Check if gripper has reached target
 
         Returns:
-            bool: True if target has been reached
+            bool: True if target has been reached, and robot is static
         """
 
         target_to_gripper_dist = self._gripper_to_target(
             gripper=self.robots[0].gripper, target=self.target.root_body, target_type="body", return_distance=True
         )
+        is_robot_static = np.linalg.norm(self.robots[0]._joint_velocities) < 0.01
 
-        # gripper is within a small distance to the target
-        return target_to_gripper_dist < 0.03
+        # gripper is within a small distance to the target and robot is static
+        return target_to_gripper_dist < 0.03 and is_robot_static
 
     def reset_target(self):
 
